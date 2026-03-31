@@ -14,7 +14,7 @@
     "extra": {
         "laravel": {
             "providers": [
-                "Quatrebarbes\\Larchiclass\\LarchiclassServiceProvider"
+                "Quatrebarbes\\Larchiclass\\LarchiServiceProvider"
             ]
         }
     },

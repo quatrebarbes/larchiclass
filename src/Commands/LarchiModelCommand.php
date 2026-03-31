@@ -9,27 +9,24 @@ use Quatrebarbes\Larchiclass\Generators\PlantUmlGenerator;
 class LarchiModelCommand extends Command
 {
     protected $signature = 'larchi:model
-                            {--namespace= : The namespace to analyze (default: App\\Models)}
-                            {--output= : Output file path (default: larchi-model.puml)}
-                            {--with-vendor : Also analyze and expand vendor classes (parents, interfaces, traits)}
-                            {--keep-relation-methods : Keep relationship methods in the methods section (in addition to arrows)}';
+                            {--namespace= : Namespace to analyze (default: App\\Models)}
+                            {--output=    : Output file path (default: larchi-model.puml)}
+                            {--with-vendor           : Expand vendor classes in structural relations}
+                            {--keep-relation-methods : Keep relation methods in class blocks (in addition to relation lines)}';
 
-    protected $description = 'Analyze PHP classes and generate a PlantUML class diagram';
+    protected $description = 'Analyze Eloquent models and generate a PlantUML class diagram (with fillable properties and relationships)';
 
     public function handle(ClassAnalyzer $analyzer, PlantUmlGenerator $generator): int
     {
         $namespace           = $this->option('namespace') ?? 'App\\Models';
-        $output              = $this->option('output') ?? base_path('larchi-model.puml');
+        $output              = $this->option('output')    ?? base_path('larchi-model.puml');
         $withVendor          = (bool) $this->option('with-vendor');
         $keepRelationMethods = (bool) $this->option('keep-relation-methods');
 
         $this->info("🔍 Analyzing namespace: <comment>{$namespace}</comment>");
 
-        if ($withVendor) {
-            $this->line("  <comment>--with-vendor</comment> enabled: vendor classes will be fully expanded.");
-        }
         if ($keepRelationMethods) {
-            $this->line("  <comment>--keep-relation-methods</comment> enabled: relation methods kept in class blocks.");
+            $this->line("  <comment>--keep-relation-methods</comment>: relation methods kept in class blocks.");
         }
 
         $classes = $analyzer->discoverClasses($namespace);
@@ -44,7 +41,7 @@ class LarchiModelCommand extends Command
 
         $classData = [];
         foreach ($classes as $fqcn) {
-            $this->line("  → Analyzing <comment>{$fqcn}</comment>");
+            $this->line("  → <comment>{$fqcn}</comment>");
             $classData[] = $analyzer->analyze($fqcn, $withVendor);
         }
 
@@ -53,7 +50,6 @@ class LarchiModelCommand extends Command
 
         $this->newLine();
         $this->info("✅ Diagram generated: <comment>{$output}</comment>");
-        $this->line("Open it with PlantUML, IntelliJ, VS Code (PlantUML extension), or https://www.plantuml.com/plantuml");
 
         return self::SUCCESS;
     }

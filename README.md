@@ -59,8 +59,6 @@ php artisan larchi:model --namespace="App\Domain\Billing" --output="docs/billing
 
 ## Viewing the diagram
 
-- **VS Code** - install the [PlantUML extension](https://marketplace.visualstudio.com/items?itemName=jebbs.plantuml) and press `Alt+D`
-- **IntelliJ / PhpStorm** - built-in PlantUML support
 - **Online** - paste the content at https://www.plantuml.com/plantuml/uml
 - **CLI** - `java -jar plantuml.jar larchi-model.puml`
 

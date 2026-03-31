@@ -40,46 +40,71 @@ class ClassAnalyzer
 
     /**
      * Analyze a single class via Reflection and return structured data.
+     * Eloquent-specific logic (fillable, relations) is applied when the class
+     * is detected as an Eloquent model.
      *
-     * When $withVendor is false (default), vendor classes referenced as parent /
-     * interfaces / traits are recorded as stubs (name only, no members).
-     * When $withVendor is true, they are fully expanded.
+     * @see analyzeAsPlainClass() for a version that always skips Eloquent logic.
      */
     public function analyze(string $fqcn, bool $withVendor = false): array
     {
+        $ref     = new ReflectionClass($fqcn);
+        $isModel = $this->isEloquentModel($ref);
+
+        return $this->buildClassData($ref, $fqcn, $withVendor, forceNonEloquent: ! $isModel);
+    }
+
+    /**
+     * Analyze a class using only standard PHP reflection, ignoring any Eloquent
+     * metadata (fillable, casts, relations). Use this for larchi:class.
+     */
+    public function analyzeAsPlainClass(string $fqcn, bool $withVendor = false): array
+    {
         $ref = new ReflectionClass($fqcn);
 
+        return $this->buildClassData($ref, $fqcn, $withVendor, forceNonEloquent: true);
+    }
+
+    // -----------------------------------------------------------------------
+    // Core data builder
+    // -----------------------------------------------------------------------
+
+    /**
+     * Build the full class data array.
+     *
+     * @param  bool  $forceNonEloquent  When true, skip Eloquent-specific logic
+     *                                  (fillable, relations) even if the class
+     *                                  is a subclass of Model.
+     */
+    private function buildClassData(ReflectionClass $ref, string $fqcn, bool $withVendor, bool $forceNonEloquent): array
+    {
         $parentFqcn    = $ref->getParentClass() ? $ref->getParentClass()->getName() : null;
         $interfaceFqcn = array_values($ref->getInterfaceNames());
         $traitFqcn     = array_values($ref->getTraitNames());
 
-        $isModel       = $this->isEloquentModel($ref);
-        $relations     = $isModel ? $this->relationshipExtractor->extract($fqcn) : [];
+        $isModel         = ! $forceNonEloquent && $this->isEloquentModel($ref);
+        $relations       = $isModel ? $this->relationshipExtractor->extract($fqcn) : [];
         $relationMethods = array_column($relations, 'method');
 
         return [
-            'fqcn'           => $fqcn,
-            'name'           => $ref->getShortName(),
-            'namespace'      => $ref->getNamespaceName(),
-            'isAbstract'     => $ref->isAbstract() && ! $ref->isInterface(),
-            'isInterface'    => $ref->isInterface(),
-            'isTrait'        => $ref->isTrait(),
-            'isEnum'         => $ref->isEnum(),
-            'isEloquent'     => $isModel,
-            'isVendor'       => false,
-            'parent'         => $parentFqcn,
-            'parentIsVendor' => $parentFqcn !== null && $this->isVendorClass($parentFqcn),
-            'interfaces'     => $interfaceFqcn,
-            'traits'         => $traitFqcn,
-            'withVendor'     => $withVendor,
-            'relations'      => $relations,
-            'properties'     => $isModel
-                                    ? $this->extractEloquentProperties($ref)
-                                    : $this->extractProperties($ref),
-            // Relation methods are stored separately; they will be filtered
-            // from the methods list unless --keep-relation-methods is passed.
-            // We attach the relation method names so the generator can decide.
+            'fqcn'            => $fqcn,
+            'name'            => $ref->getShortName(),
+            'namespace'       => $ref->getNamespaceName(),
+            'isAbstract'      => $ref->isAbstract() && ! $ref->isInterface(),
+            'isInterface'     => $ref->isInterface(),
+            'isTrait'         => $ref->isTrait(),
+            'isEnum'          => $ref->isEnum(),
+            'isEloquent'      => $isModel,
+            'isVendor'        => false,
+            'parent'          => $parentFqcn,
+            'parentIsVendor'  => $parentFqcn !== null && $this->isVendorClass($parentFqcn),
+            'interfaces'      => $interfaceFqcn,
+            'traits'          => $traitFqcn,
+            'withVendor'      => $withVendor,
+            'relations'       => $relations,
             'relationMethods' => $relationMethods,
+            'properties'      => $isModel
+                                     ? $this->extractEloquentProperties($ref)
+                                     : $this->extractProperties($ref),
             'methods'         => $this->extractMethods($ref),
         ];
     }
