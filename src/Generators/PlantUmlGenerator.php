@@ -17,8 +17,8 @@ class PlantUmlGenerator
      */
     public function generate(array $classes, bool $withVendor = false, bool $keepRelationMethods = false): string
     {
-        // Vendor stubs are still built so structural relations (extends/implements)
-        // pointing to vendor classes can be resolved - but they are NOT rendered.
+        // Vendor stubs are always built for relation resolution.
+        // They are rendered (as empty boxes) only when --with-vendor is passed.
         $vendorExtras = $this->analyzer->buildVendorStubs($classes);
         $all          = array_merge($classes, $vendorExtras);
 
@@ -39,26 +39,46 @@ class PlantUmlGenerator
         $lines[] = 'skinparam class {';
         $lines[] = '    BackgroundColor<<model>> #D8F3DC';
         $lines[] = '    BorderColor<<model>> #52B788';
+        if ($withVendor) {
+            $lines[] = '    BackgroundColor<<vendor>> #E9ECEF';
+            $lines[] = '    BorderColor<<vendor>> #ADB5BD';
+            $lines[] = '    FontColor<<vendor>> #6C757D';
+        }
         $lines[] = '}';
         $lines[] = '';
         $lines[] = 'hide empty members';
         $lines[] = '';
 
-        // --- App classes only (vendor classes are never rendered) ---
+        // --- App classes ---
         $appClasses = array_filter($all, fn ($c) => ! ($c['isVendor'] ?? false));
         if (! empty($appClasses)) {
-            $lines[] = "' ── Application classes ─────────────────────────────";
+            $lines[] = "' -- Application classes -----------------------------";
             foreach ($appClasses as $class) {
                 $lines[] = $this->renderClassBlock($class, $keepRelationMethods);
             }
         }
 
+        // --- Vendor classes (stubs only, rendered when --with-vendor) ---
+        if ($withVendor) {
+            $vendorClasses = array_filter($all, fn ($c) => ($c['isVendor'] ?? false));
+            if (! empty($vendorClasses)) {
+                $lines[] = "' -- Vendor classes (stubs) --------------------------";
+                foreach ($vendorClasses as $class) {
+                    // Always force isStub=true — vendor members are never shown
+                    $lines[] = $this->renderClassBlock(
+                        array_merge($class, ['isStub' => true]),
+                        keepRelationMethods: false
+                    );
+                }
+            }
+        }
+
         // --- Inheritance / interface / trait relations ---
-        // Only between app classes; vendor nodes are used for resolution only.
-        $structuralRelations = $this->renderStructuralRelations($appClasses);
+        // Structural relations: include vendor nodes in the graph when --with-vendor
+        $structuralRelations = $this->renderStructuralRelations($withVendor ? $all : $appClasses);
         if (! empty($structuralRelations)) {
             $lines[] = '';
-            $lines[] = "' ── Structural relations (extends / implements / uses) ──";
+            $lines[] = "' -- Structural relations (extends / implements / uses) --";
             foreach ($structuralRelations as $rel) {
                 $lines[] = $rel;
             }
@@ -68,7 +88,7 @@ class PlantUmlGenerator
         $eloquentRelations = $this->renderEloquentRelations($all);
         if (! empty($eloquentRelations)) {
             $lines[] = '';
-            $lines[] = "' ── Eloquent relationships ──────────────────────────";
+            $lines[] = "' -- Eloquent relationships --------------------------";
             foreach ($eloquentRelations as $rel) {
                 $lines[] = $rel;
             }
@@ -121,7 +141,7 @@ class PlantUmlGenerator
                 $lines[] = '    --';
             }
 
-            // Methods - filter out relation methods unless --keep-relation-methods
+            // Methods — filter out relation methods unless --keep-relation-methods
             $relationMethodNames = $class['relationMethods'] ?? [];
             $methods = $keepRelationMethods
                 ? $class['methods']
@@ -160,7 +180,7 @@ class PlantUmlGenerator
                 $lines[]     = "{$parentShort} <|-- {$shortName}";
             }
 
-            // Interface implementation - only if the interface is in our set
+            // Interface implementation — only if the interface is in our set
             foreach ($class['interfaces'] as $iface) {
                 if (isset($classNames[$iface])) {
                     $ifaceShort = $classNames[$iface];
@@ -168,7 +188,7 @@ class PlantUmlGenerator
                 }
             }
 
-            // Trait usage - only if the trait is in our set
+            // Trait usage — only if the trait is in our set
             foreach ($class['traits'] as $trait) {
                 if (isset($classNames[$trait])) {
                     $traitShort = $classNames[$trait];
@@ -208,7 +228,7 @@ class PlantUmlGenerator
             $shortIndex[$c['name']] = $c['name'];
         }
 
-        // ── Step 1: collect all directed edges ───────────────────────────────
+        // -- Step 1: collect all directed edges -------------------------------
         // Each edge: ['source' => string, 'target' => string, 'rel' => array]
         $edges      = [];
         $morphEdges = [];   // morphTo has no reciprocal, handled separately
@@ -236,7 +256,7 @@ class PlantUmlGenerator
             }
         }
 
-        // ── Step 2: group edges by unordered pair {A, B} ─────────────────────
+        // -- Step 2: group edges by unordered pair {A, B} ---------------------
         // Key = alphabetically sorted "ClassA|ClassB" so A→B and B→A share a bucket.
         $buckets = [];
         foreach ($edges as $edge) {
@@ -246,7 +266,7 @@ class PlantUmlGenerator
             $buckets[$key][] = $edge;
         }
 
-        // ── Step 3: emit one line per bucket ──────────────────────────────────
+        // -- Step 3: emit one line per bucket ----------------------------------
         foreach ($buckets as $edges) {
             if (count($edges) === 1) {
                 $e     = $edges[0];
@@ -273,7 +293,7 @@ class PlantUmlGenerator
             $lines[] = "{$source} \"{$sc}\" -- \"{$tc}\" {$target} : {$label}";
         }
 
-        // ── Step 4: morphTo (polymorphic - no reciprocal possible) ────────────
+        // -- Step 4: morphTo (polymorphic — no reciprocal possible) ------------
         foreach ($morphEdges as $me) {
             $lines[] = "{$me['source']} .. * : {$me['rel']['method']} (morphTo)";
         }
@@ -293,7 +313,7 @@ class PlantUmlGenerator
         );
 
         // PlantUML uses \n inside quoted labels for line breaks
-        return '"' . implode('\\n--\\n', $parts) . '"';
+        return '"' . implode('\\n——\\n', $parts) . '"';
     }
 
     /**

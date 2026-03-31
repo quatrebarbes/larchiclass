@@ -89,7 +89,7 @@ interface Authenticatable {
     + getAuthPassword() : string
 }
 
-' ── Relations ──────────────────────────────────────
+' -- Relations --------------------------------------
 Model <|-- User
 Authenticatable <|.. User
 
