@@ -1,4 +1,4 @@
-# laravel-archi
+# LarchiClass 😎
 
 A Laravel package that analyzes your PHP classes and generates a **PlantUML class diagram** (`.puml`).
 
@@ -9,8 +9,6 @@ composer require quatrebarbes/larchiclass --dev
 ```
 
 Laravel auto-discovers the service provider. No manual registration needed.
-
----
 
 ## larchi:class
 
@@ -38,9 +36,7 @@ php artisan larchi:class --output="docs/diagram.puml"
 php artisan larchi:class --namespace="App\Domain\Marketing" --output="docs/marketing.puml"
 ```
 
----
-
-## larchi:mdel
+## larchi:model
 
 ```bash
 php artisan larchi:model
@@ -65,5 +61,3 @@ php artisan larchi:model --output="docs/diagram.puml"
 ```bash
 php artisan larchi:model --namespace="App\Models\SubDomain" --output="docs/sub-domain.puml"
 ```
-
----

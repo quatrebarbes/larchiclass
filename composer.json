@@ -2,6 +2,13 @@
     "name": "quatrebarbes/larchiclass",
     "description": "Some architecture-related commands for Laravel developers",
     "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Jean de Quatrebarbes",
+            "email": "jean.de.quatrebarbes@hotmail.fr"
+        }
+    ],
     "require": {
         "php": "^8.1",
         "illuminate/support": "^10.0|^11.0"
