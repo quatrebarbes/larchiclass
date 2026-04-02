@@ -15,13 +15,11 @@ class LarchiServiceProvider extends ServiceProvider
     {
         $this->app->singleton(RelationshipExtractor::class);
 
-        $this->app->singleton(ClassAnalyzer::class, function ($app) {
-            return new ClassAnalyzer($app->make(RelationshipExtractor::class));
-        });
+        $this->app->singleton(ClassAnalyzer::class, fn ($app) =>
+            new ClassAnalyzer($app->make(RelationshipExtractor::class))
+        );
 
-        $this->app->singleton(PlantUmlGenerator::class, function ($app) {
-            return new PlantUmlGenerator($app->make(ClassAnalyzer::class));
-        });
+        $this->app->singleton(PlantUmlGenerator::class);
     }
 
     public function boot(): void

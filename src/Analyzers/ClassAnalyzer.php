@@ -16,57 +16,39 @@ class ClassAnalyzer
     ) {}
 
     /**
-     * Discover all FQCN in a given namespace by scanning Composer's classmap.
+     * Discover all FQCNs in a given namespace by scanning Composer's classmap,
+     * with a filesystem fallback (PSR-4 convention).
      */
     public function discoverClasses(string $namespace): array
     {
-        $namespace = rtrim($namespace, '\\') . '\\';
-        $classes   = [];
+        $namespace = rtrim($namespace, '\\');
 
-        // Strategy 1: Composer classmap (most reliable)
-        $classMap = $this->getComposerClassMap();
-        foreach (array_keys($classMap) as $fqcn) {
-            if (str_starts_with($fqcn, $namespace)) {
-                $classes[] = $fqcn;
-            }
-        }
+        $classes = array_filter(
+            array_keys($this->getComposerClassMap()),
+            fn (string $fqcn) => str_starts_with($fqcn, $namespace . '\\') || $fqcn === $namespace
+        );
 
-        // Strategy 2: Filesystem scan as fallback (PSR-4 convention)
-        if (empty($classes)) {
-            $classes = $this->discoverByFilesystem($namespace);
-        }
-
-        return array_values(array_unique($classes));
+        return array_values($classes);
     }
 
     /**
      * Analyze a single class via Reflection and return structured data.
-     * Eloquent-specific logic (fillable, relations) is applied when the class
-     * is said and detected as an Eloquent model.
      */
     public function analyze(string $fqcn, bool $withVendor = false, bool $isEloquentModel = false): array
     {
-        $ref = new ReflectionClass($fqcn);
-
-        return $this->buildClassData($ref, $fqcn, $withVendor, $isEloquentModel);
+        return $this->buildClassData(new ReflectionClass($fqcn), $fqcn, $withVendor, $isEloquentModel);
     }
 
-    // -----------------------------------------------------------------------
+    // -------------------------------------------------------------------------
     // Core data builder
-    // -----------------------------------------------------------------------
+    // -------------------------------------------------------------------------
 
-    /**
-     * Build the full class data array.
-     */
     protected function buildClassData(ReflectionClass $ref, string $fqcn, bool $withVendor, bool $isEloquentModel): array
     {
-        $parentFqcn    = $ref->getParentClass() ? $ref->getParentClass()->getName() : null;
-        $interfaceFqcn = array_values($ref->getInterfaceNames());
-        $traitFqcn     = array_values($ref->getTraitNames());
+        $parentFqcn = $ref->getParentClass() ? $ref->getParentClass()->getName() : null;
 
-        $isModel         = $isEloquentModel && $this->isEloquentModel($ref);
-        $relations       = $isModel ? $this->relationshipExtractor->extract($fqcn) : [];
-        $relationMethods = array_column($relations, 'method');
+        $isModel   = $isEloquentModel && $this->isEloquentModel($ref);
+        $relations = $isModel ? $this->relationshipExtractor->extract($fqcn) : [];
 
         return [
             'fqcn'            => $fqcn,
@@ -80,22 +62,22 @@ class ClassAnalyzer
             'isVendor'        => false,
             'parent'          => $parentFqcn,
             'parentIsVendor'  => $parentFqcn !== null && $this->isVendorClass($parentFqcn),
-            'interfaces'      => $interfaceFqcn,
-            'traits'          => $traitFqcn,
+            'interfaces'      => array_values($ref->getInterfaceNames()),
+            'traits'          => array_values($ref->getTraitNames()),
             'withVendor'      => $withVendor,
             'relations'       => $relations,
-            'relationMethods' => $relationMethods,
             'properties'      => $isModel
-                                     ? $this->extractEloquentProperties($ref)
-                                     : $this->extractProperties($ref),
-            'methods'         => $this->extractMethods($ref),
+                ? $this->extractEloquentProperties($ref)
+                : $this->extractProperties($ref),
+            'methods'         => array_filter(
+                $this->extractMethods($ref),
+                fn($method) => !in_array($method['name'], array_column($relations, 'method'))
+            ),
         ];
     }
 
     /**
-     * Build stub entries for vendor classes that appear as parents / interfaces /
-     * traits of analyzed classes - only when $withVendor is false.
-     * These stubs are rendered as empty boxes with a <<vendor>> stereotype.
+     * Build stub entries for vendor classes referenced as parents / interfaces / traits.
      */
     public function buildVendorStubs(array $classDataList): array
     {
@@ -104,9 +86,6 @@ class ClassAnalyzer
         $seen      = [];
 
         foreach ($classDataList as $class) {
-            $withVendor = $class['withVendor'];
-
-            // Collect all referenced external FQCNs
             $refs = array_filter(array_merge(
                 $class['parent'] ? [$class['parent']] : [],
                 $class['interfaces'],
@@ -124,17 +103,15 @@ class ClassAnalyzer
 
                 $seen[$fqcn] = true;
 
-                if ($withVendor) {
-                    // Full analysis of the vendor class
+                if ($class['withVendor']) {
                     try {
-                        $analyzed            = $this->analyze($fqcn, true);
+                        $analyzed             = $this->analyze($fqcn, true);
                         $analyzed['isVendor'] = true;
-                        $stubs[]             = $analyzed;
+                        $stubs[]              = $analyzed;
                     } catch (\Throwable) {
                         $stubs[] = $this->makeStub($fqcn);
                     }
                 } else {
-                    // Lightweight stub - name only
                     $stubs[] = $this->makeStub($fqcn);
                 }
             }
@@ -143,20 +120,18 @@ class ClassAnalyzer
         return $stubs;
     }
 
-    // -----------------------------------------------------------------------
+    // -------------------------------------------------------------------------
     // Public helper
-    // -----------------------------------------------------------------------
+    // -------------------------------------------------------------------------
 
     public function isVendorClass(string $fqcn): bool
     {
         $classMap = $this->getComposerClassMap();
 
         if (isset($classMap[$fqcn])) {
-            $path = str_replace('\\', '/', $classMap[$fqcn]);
-            return str_contains($path, '/vendor/');
+            return str_contains(str_replace('\\', '/', $classMap[$fqcn]), '/vendor/');
         }
 
-        // Fallback: try resolving via Reflection
         try {
             $file = (new ReflectionClass($fqcn))->getFileName();
             return $file !== false && str_contains(str_replace('\\', '/', $file), '/vendor/');
@@ -165,9 +140,9 @@ class ClassAnalyzer
         }
     }
 
-    // -----------------------------------------------------------------------
+    // -------------------------------------------------------------------------
     // Protected helpers
-    // -----------------------------------------------------------------------
+    // -------------------------------------------------------------------------
 
     protected function makeStub(string $fqcn): array
     {
@@ -177,32 +152,29 @@ class ClassAnalyzer
             $isTrait     = $ref->isTrait();
             $isAbstract  = $ref->isAbstract() && ! $isInterface;
         } catch (\Throwable) {
-            $isInterface = false;
-            $isTrait     = false;
-            $isAbstract  = false;
+            $isInterface = $isTrait = $isAbstract = false;
         }
 
         $parts = explode('\\', $fqcn);
 
         return [
-            'fqcn'           => $fqcn,
-            'name'           => end($parts),
-            'namespace'      => implode('\\', array_slice($parts, 0, -1)),
-            'isAbstract'     => $isAbstract,
-            'isInterface'    => $isInterface,
-            'isTrait'        => $isTrait,
-            'isEnum'         => false,
-            'isVendor'       => true,
-            'isStub'         => true,   // no members rendered
-            'parent'         => null,
-            'parentIsVendor' => false,
-            'interfaces'     => [],
-            'traits'         => [],
-            'withVendor'     => false,
-            'relations'      => [],
-            'relationMethods' => [],
-            'properties'     => [],
-            'methods'        => [],
+            'fqcn'            => $fqcn,
+            'name'            => end($parts),
+            'namespace'       => implode('\\', array_slice($parts, 0, -1)),
+            'isAbstract'      => $isAbstract,
+            'isInterface'     => $isInterface,
+            'isTrait'         => $isTrait,
+            'isEnum'          => false,
+            'isVendor'        => true,
+            'isStub'          => true,
+            'parent'          => null,
+            'parentIsVendor'  => false,
+            'interfaces'      => [],
+            'traits'          => [],
+            'withVendor'      => false,
+            'relations'       => [],
+            'properties'      => [],
+            'methods'         => [],
         ];
     }
 
@@ -212,27 +184,14 @@ class ClassAnalyzer
     }
 
     /**
-     * Extract properties from an Eloquent model by reading the Eloquent
-     * metadata arrays: $fillable, $casts, $hidden, $dates, $appends.
+     * Extract Eloquent model properties from $fillable, $casts, $hidden, $dates, $appends.
      *
-     * Strategy: instantiate the class without calling the constructor
-     * (ReflectionClass::newInstanceWithoutConstructor) so we can safely read
-     * the default property values even in environments without a database.
-     *
-     * Type resolution priority:
-     *   1. $casts   → explicit cast type (e.g. 'integer', 'boolean', 'datetime')
-     *   2. $dates   → 'datetime'
-     *   3. otherwise → 'mixed'
-     *
-     * Visibility:
-     *   - $fillable  → public  (mass-assignable)
-     *   - $hidden    → private (excluded from serialization)
-     *   - $appends   → public  (virtual / accessor attributes)
-     *   - $dates     → public
+     * Type resolution priority: $casts → $dates → 'mixed'.
+     * Visibility: $fillable → public (or private if also $hidden),
+     *             $hidden → private, $dates / $appends → public.
      */
     protected function extractEloquentProperties(ReflectionClass $ref): array
     {
-        // Safe instantiation - no constructor, no DB calls
         try {
             $instance = $ref->newInstanceWithoutConstructor();
         } catch (\Throwable) {
@@ -243,27 +202,24 @@ class ClassAnalyzer
         $hidden   = $this->readArrayProp($ref, $instance, 'hidden');
         $dates    = $this->readArrayProp($ref, $instance, 'dates');
         $appends  = $this->readArrayProp($ref, $instance, 'appends');
-        $casts    = $this->readArrayProp($ref, $instance, 'casts');   // ['field' => 'type']
+        $casts    = $this->readArrayProp($ref, $instance, 'casts');
 
-        // Index hidden and dates for O(1) lookup
         $hiddenSet = array_flip($hidden);
         $datesSet  = array_flip($dates);
 
         $properties = [];
         $seen       = [];
 
-        $add = function (string $name, string $visibility) use (
-            &$properties, &$seen, $casts, $datesSet
-        ): void {
+        $add = function (string $name, string $visibility) use (&$properties, &$seen, $casts, $datesSet): void {
             if (isset($seen[$name])) {
                 return;
             }
             $seen[$name] = true;
 
             $type = match (true) {
-                isset($casts[$name])  => $this->normalizeCastType($casts[$name]),
+                isset($casts[$name])    => $this->normalizeCastType($casts[$name]),
                 isset($datesSet[$name]) => 'datetime',
-                default               => 'mixed',
+                default                 => 'mixed',
             };
 
             $properties[] = [
@@ -275,41 +231,36 @@ class ClassAnalyzer
             ];
         };
 
-        // $fillable → public (unless also in $hidden)
         foreach ($fillable as $field) {
             $add($field, isset($hiddenSet[$field]) ? 'private' : 'public');
         }
-
-        // $hidden fields not already in $fillable → private
         foreach ($hidden as $field) {
             $add($field, 'private');
         }
-
-        // $dates fields not yet seen → public datetime
         foreach ($dates as $field) {
             $add($field, 'public');
         }
-
-        // $appends (virtual accessor attributes) → public
         foreach ($appends as $field) {
             $add($field, 'public');
+        }
+        foreach (array_keys($casts) as $field) {
+            $add($field, isset($hiddenSet[$field]) ? 'private' : 'public');
         }
 
         return $properties;
     }
 
     /**
-     * Read a protected/private array property from a model instance (or its
-     * default value) without triggering Eloquent boot logic.
+     * Read a protected/private array property from a model instance,
+     * walking up the class hierarchy as needed.
      */
     protected function readArrayProp(ReflectionClass $ref, ?object $instance, string $propName): array
     {
-        // Walk up the class hierarchy to find where the property is declared
         $declaring = $ref;
         while ($declaring !== false) {
             if ($declaring->hasProperty($propName)) {
                 $prop = $declaring->getProperty($propName);
-                $prop->setAccessible(true); // deprecated
+                $prop->setAccessible(true);
 
                 $value = $instance !== null
                     ? $prop->getValue($instance)
@@ -324,18 +275,17 @@ class ClassAnalyzer
     }
 
     /**
-     * Normalize Eloquent cast types to more readable labels.
-     * Handles class-based casts (e.g. AsCollection::class) by using the short name.
+     * Normalize an Eloquent cast type to a readable label.
+     * Class-based casts (e.g. AsCollection::class) return the short name.
+     * Parameterized casts (e.g. "decimal:2") return the base type.
      */
     protected function normalizeCastType(string $cast): string
     {
-        // Class-based cast (FQCN or short name with backslash)
         if (str_contains($cast, '\\')) {
             $parts = explode('\\', $cast);
             return end($parts);
         }
 
-        // Parameterized cast: e.g. "decimal:2" → "decimal"
         return explode(':', $cast)[0];
     }
 
@@ -344,10 +294,10 @@ class ClassAnalyzer
         $properties = [];
 
         foreach ($ref->getProperties() as $prop) {
-            $declaringClass = $prop->getDeclaringClass();
+            $declaring = $prop->getDeclaringClass();
 
-            // Skip properties inherited from a parent class or a trait
-            if ($ref->getName() != $declaringClass->getName() || $declaringClass->isTrait()) {
+            // Skip properties inherited from a parent class or provided by a trait
+            if ($ref->getName() !== $declaring->getName() || $declaring->isTrait()) {
                 continue;
             }
 
@@ -368,17 +318,15 @@ class ClassAnalyzer
         $methods   = [];
 
         foreach ($ref->getMethods() as $method) {
-            // If the declaring class differs from $ref's file, it is inherited from a
-            // parent or provided by a trait - skip it.
-            if ($method->getFileName() != $classFile) {
+            // Skip methods inherited from a parent or provided by a trait
+            if ($method->getFileName() !== $classFile) {
                 continue;
             }
 
-            $params = [];
-            foreach ($method->getParameters() as $param) {
-                $type     = $this->resolveType($param->getType());
-                $params[] = ($type ? "{$type} " : '') . '$' . $param->getName();
-            }
+            $params = array_map(function ($param) {
+                $type = $this->resolveType($param->getType());
+                return ($type ? "{$type} " : '') . '$' . $param->getName();
+            }, $method->getParameters());
 
             $methods[] = [
                 'name'       => $method->getName(),
@@ -395,16 +343,20 @@ class ClassAnalyzer
 
     protected function visibility(ReflectionProperty $prop): string
     {
-        if ($prop->isPublic()) return 'public';
-        if ($prop->isProtected()) return 'protected';
-        return 'private';
+        return match (true) {
+            $prop->isPublic()    => 'public',
+            $prop->isProtected() => 'protected',
+            default              => 'private',
+        };
     }
 
     protected function methodVisibility(ReflectionMethod $method): string
     {
-        if ($method->isPublic()) return 'public';
-        if ($method->isProtected()) return 'protected';
-        return 'private';
+        return match (true) {
+            $method->isPublic()    => 'public',
+            $method->isProtected() => 'protected',
+            default                => 'private',
+        };
     }
 
     protected function resolveType(mixed $type): ?string
@@ -414,10 +366,7 @@ class ClassAnalyzer
         }
 
         if ($type instanceof ReflectionUnionType) {
-            return implode('|', array_map(
-                fn ($t) => $t->getName(),
-                $type->getTypes()
-            ));
+            return implode('|', array_map(fn ($t) => $t->getName(), $type->getTypes()));
         }
 
         if ($type instanceof ReflectionNamedType) {
@@ -431,55 +380,7 @@ class ClassAnalyzer
     protected function getComposerClassMap(): array
     {
         $autoloadFile = base_path('vendor/composer/autoload_classmap.php');
-        if (file_exists($autoloadFile)) {
-            return require $autoloadFile;
-        }
-        return [];
-    }
 
-    protected function discoverByFilesystem(string $namespace): array
-    {
-        $classes = [];
-
-        // Resolve namespace to directory using PSR-4 mappings from composer.json
-        $composerJson = base_path('composer.json');
-        if (! file_exists($composerJson)) {
-            return [];
-        }
-
-        $composer  = json_decode(file_get_contents($composerJson), true);
-        $psr4      = array_merge(
-            $composer['autoload']['psr-4'] ?? [],
-            $composer['autoload-dev']['psr-4'] ?? []
-        );
-
-        $directory = null;
-        $bestMatch = '';
-
-        foreach ($psr4 as $prefix => $path) {
-            if (str_starts_with($namespace, $prefix) && strlen($prefix) > strlen($bestMatch)) {
-                $bestMatch = $prefix;
-                $subPath   = str_replace('\\', '/', substr($namespace, strlen($prefix)));
-                $directory = base_path(rtrim($path, '/') . '/' . $subPath);
-            }
-        }
-
-        if (! $directory || ! is_dir($directory)) {
-            return [];
-        }
-
-        $finder = new Finder();
-        $finder->files()->in($directory)->name('*.php');
-
-        foreach ($finder as $file) {
-            $relative = str_replace('/', '\\', $file->getRelativePathname());
-            $fqcn     = $namespace . str_replace('.php', '', $relative);
-
-            if (class_exists($fqcn) || interface_exists($fqcn) || trait_exists($fqcn)) {
-                $classes[] = $fqcn;
-            }
-        }
-
-        return $classes;
+        return file_exists($autoloadFile) ? require $autoloadFile : [];
     }
 }
