@@ -2,25 +2,17 @@
 
 namespace Quatrebarbes\Larchiclass\Generators;
 
-use Quatrebarbes\Larchiclass\Analyzers\ClassAnalyzer;
-
 class PlantUmlGenerator
 {
-    public function __construct(private readonly ClassAnalyzer $analyzer) {}
-
     /**
      * Generate a PlantUML diagram string from an array of analyzed class data.
      *
-     * @param  array[]  $classes              Output of ClassAnalyzer::analyze()
-     * @param  bool     $withVendor           When true, vendor classes are fully expanded
-     * @param  bool     $keepRelationMethods  When true, relation methods are kept in class blocks
+     * @param  array[]  $appClasses     Output of ClassAnalyzer::analyze()
+     * @param  array[]  $vendorClasses  Output of ClassAnalyzer::buildVendorStubs($appClasses)
      */
-    public function generate(array $classes, bool $withVendor = false, bool $keepRelationMethods = false): string
+    public function generate(array $appClasses, array $vendorClasses = []): string
     {
-        // Vendor stubs are always built for relation resolution.
-        // They are rendered (as empty boxes) only when --with-vendor is passed.
-        $vendorExtras = $this->analyzer->buildVendorStubs($classes);
-        $all          = array_merge($classes, $vendorExtras);
+        $allClasses = array_merge($appClasses, $vendorClasses);
 
         $lines   = [];
         $lines[] = '@startuml';
@@ -39,7 +31,7 @@ class PlantUmlGenerator
         $lines[] = 'skinparam class {';
         $lines[] = '    BackgroundColor<<model>> #D8F3DC';
         $lines[] = '    BorderColor<<model>> #52B788';
-        if ($withVendor) {
+        if (count($vendorClasses)) {
             $lines[] = '    BackgroundColor<<vendor>> #E9ECEF';
             $lines[] = '    BorderColor<<vendor>> #ADB5BD';
             $lines[] = '    FontColor<<vendor>> #6C757D';
@@ -50,32 +42,24 @@ class PlantUmlGenerator
         $lines[] = '';
 
         // --- App classes ---
-        $appClasses = array_filter($all, fn ($c) => ! ($c['isVendor'] ?? false));
         if (! empty($appClasses)) {
             $lines[] = "' -- Application classes -----------------------------";
             foreach ($appClasses as $class) {
-                $lines[] = $this->renderClassBlock($class, $keepRelationMethods);
+                $lines[] = $this->renderClassBlock($class);
             }
         }
 
         // --- Vendor classes (stubs only, rendered when --with-vendor) ---
-        if ($withVendor) {
-            $vendorClasses = array_filter($all, fn ($c) => ($c['isVendor'] ?? false));
-            if (! empty($vendorClasses)) {
-                $lines[] = "' -- Vendor classes (stubs) --------------------------";
-                foreach ($vendorClasses as $class) {
-                    // Always force isStub=true — vendor members are never shown
-                    $lines[] = $this->renderClassBlock(
-                        array_merge($class, ['isStub' => true]),
-                        keepRelationMethods: false
-                    );
-                }
+        if (! empty($vendorClasses)) {
+            $lines[] = "' -- Vendor classes (stubs) --------------------------";
+            foreach ($vendorClasses as $class) {
+                $lines[] = $this->renderClassBlock($class);
             }
         }
 
         // --- Inheritance / interface / trait relations ---
         // Structural relations: include vendor nodes in the graph when --with-vendor
-        $structuralRelations = $this->renderStructuralRelations($withVendor ? $all : $appClasses);
+        $structuralRelations = $this->renderStructuralRelations($allClasses);
         if (! empty($structuralRelations)) {
             $lines[] = '';
             $lines[] = "' -- Structural relations (extends / implements / uses) --";
@@ -85,7 +69,7 @@ class PlantUmlGenerator
         }
 
         // --- Eloquent relations ---
-        $eloquentRelations = $this->renderEloquentRelations($all);
+        $eloquentRelations = $this->renderEloquentRelations($allClasses);
         if (! empty($eloquentRelations)) {
             $lines[] = '';
             $lines[] = "' -- Eloquent relationships --------------------------";
@@ -101,19 +85,17 @@ class PlantUmlGenerator
     }
 
     // -----------------------------------------------------------------------
-    // Private helpers
+    // Protected helpers
     // -----------------------------------------------------------------------
 
-    private function renderClassBlock(array $class, bool $keepRelationMethods = false): string
+    protected function renderClassBlock(array $class): string
     {
         $lines = [];
 
-        $isVendor  = $class['isVendor'] ?? false;
-        $isStub    = $class['isStub'] ?? false;
+        $isVendor = $class['isVendor'] ?? false;
 
         $keyword = match (true) {
             $class['isInterface'] => 'interface',
-            $class['isTrait']     => 'class',
             $class['isAbstract']  => 'abstract class',
             $class['isEnum']      => 'enum',
             default               => 'class',
@@ -128,7 +110,8 @@ class PlantUmlGenerator
         $shortName = $class['name'];
         $lines[]   = "{$keyword} {$shortName}{$stereotype} {";
 
-        if (! $isStub) {
+        // Vendor members are never shown
+        if (! $isVendor) {
             // Properties
             foreach ($class['properties'] as $prop) {
                 $visibility = $this->visibilitySymbol($prop['visibility']);
@@ -141,22 +124,27 @@ class PlantUmlGenerator
                 $lines[] = '    --';
             }
 
-            // Methods — filter out relation methods unless --keep-relation-methods
+            // Methods
             $relationMethodNames = $class['relationMethods'] ?? [];
-            $methods = $keepRelationMethods
-                ? $class['methods']
-                : array_filter(
-                    $class['methods'],
-                    fn ($m) => ! in_array($m['name'], $relationMethodNames, true)
-                );
+            $methods = array_filter(
+                $class['methods'],
+                function ($m) use ($relationMethodNames) {
+                    // Relations are displayed as relations, not as methods
+                    if (in_array($m['name'], $relationMethodNames, true)) {
+                        return false;
+                    }
+                    return true;
+                }
+            );
 
             foreach ($methods as $method) {
                 $visibility = $this->visibilitySymbol($method['visibility']);
                 $static     = $method['static'] ? '{static} ' : '';
                 $abstract   = $method['abstract'] ? '{abstract} ' : '';
-                $params     = implode(', ', array_map(fn ($p) => $this->escapeType($p), $method['params']));
-                $return     = $method['return'] ? ' : ' . $this->escapeType($method['return']) : '';
-                $lines[]    = "    {$visibility}{$abstract}{$static}{$method['name']}({$params}){$return}";
+                // $params     = implode(', ', array_map(fn ($p) => $this->escapeType($p), $method['params']));
+                // $return     = $method['return'] ? ' : ' . $this->escapeType($method['return']) : '';
+                // $lines[]    = "    {$visibility}{$abstract}{$static}{$method['name']}({$params}){$return}";
+                $lines[]    = "    {$visibility}{$abstract}{$static}{$method['name']}";
             }
         }
 
@@ -166,7 +154,7 @@ class PlantUmlGenerator
         return implode(PHP_EOL, $lines);
     }
 
-    private function renderStructuralRelations(array $classes): array
+    protected function renderStructuralRelations(array $classes): array
     {
         $lines      = [];
         $classNames = array_column($classes, 'name', 'fqcn');
@@ -180,7 +168,7 @@ class PlantUmlGenerator
                 $lines[]     = "{$parentShort} <|-- {$shortName}";
             }
 
-            // Interface implementation — only if the interface is in our set
+            // Interface implementation - only if the interface is in our set
             foreach ($class['interfaces'] as $iface) {
                 if (isset($classNames[$iface])) {
                     $ifaceShort = $classNames[$iface];
@@ -188,7 +176,7 @@ class PlantUmlGenerator
                 }
             }
 
-            // Trait usage — only if the trait is in our set
+            // Trait usage - only if the trait is in our set
             foreach ($class['traits'] as $trait) {
                 if (isset($classNames[$trait])) {
                     $traitShort = $classNames[$trait];
@@ -217,7 +205,7 @@ class PlantUmlGenerator
      *   morphTo                    →  dashed, polymorphic
      *   morphToMany / morphedByMany→  "*" – "*"
      */
-    private function renderEloquentRelations(array $classes): array
+    protected function renderEloquentRelations(array $classes): array
     {
         $lines      = [];
         $classNames = array_column($classes, 'name', 'fqcn');
@@ -293,7 +281,7 @@ class PlantUmlGenerator
             $lines[] = "{$source} \"{$sc}\" -- \"{$tc}\" {$target} : {$label}";
         }
 
-        // -- Step 4: morphTo (polymorphic — no reciprocal possible) ------------
+        // -- Step 4: morphTo (polymorphic - no reciprocal possible) ------------
         foreach ($morphEdges as $me) {
             $lines[] = "{$me['source']} .. * : {$me['rel']['method']} (morphTo)";
         }
@@ -305,7 +293,7 @@ class PlantUmlGenerator
      * Build a compact multi-line PlantUML label from one or more relation descriptors.
      * Each relation produces one line: methodName <<kind>>
      */
-    private function relationLabel(array $rels): string
+    protected function relationLabel(array $rels): string
     {
         $parts = array_map(
             fn ($r) => "{$r['method']}\\n<<{$r['kind']}>>",
@@ -313,13 +301,13 @@ class PlantUmlGenerator
         );
 
         // PlantUML uses \n inside quoted labels for line breaks
-        return '"' . implode('\\n——\\n', $parts) . '"';
+        return '"' . implode('\\n--\\n', $parts) . '"';
     }
 
     /**
      * Returns [sourceCardinality, targetCardinality] for a given relation kind.
      */
-    private function cardinalityFor(string $kind): array
+    protected function cardinalityFor(string $kind): array
     {
         return match ($kind) {
             'hasOne', 'hasOneThrough', 'morphOne'              => ['1', '0..1'],
@@ -330,7 +318,7 @@ class PlantUmlGenerator
         };
     }
 
-    private function visibilitySymbol(string $visibility): string
+    protected function visibilitySymbol(string $visibility): string
     {
         return match ($visibility) {
             'public'    => '+ ',
@@ -340,14 +328,8 @@ class PlantUmlGenerator
         };
     }
 
-    private function escapeType(string $type): string
+    protected function escapeType(string $type): string
     {
         return str_replace(['<', '>'], ['{', '}'], $type);
-    }
-
-    private function shortName(string $fqcn): string
-    {
-        $parts = explode('\\', $fqcn);
-        return end($parts);
     }
 }

@@ -9,8 +9,8 @@ use Quatrebarbes\Larchiclass\Generators\PlantUmlGenerator;
 class LarchiClassCommand extends Command
 {
     protected $signature = 'larchi:class
-                            {--namespace= : Namespace to analyze (default: App)}
-                            {--output=    : Output file path (default: larchi_classes.puml)}
+                            {--namespace=  : Namespace to analyze (default: App)}
+                            {--output=     : Output file path (default: larchi-class.puml)}
                             {--with-vendor : Expand vendor classes in structural relations}';
 
     protected $description = 'Analyze PHP classes and generate a PlantUML class diagram (generic, no Eloquent-specific logic)';
@@ -18,7 +18,7 @@ class LarchiClassCommand extends Command
     public function handle(ClassAnalyzer $analyzer, PlantUmlGenerator $generator): int
     {
         $namespace  = $this->option('namespace') ?? 'App';
-        $output     = $this->option('output')    ?? base_path('larchi_classes.puml');
+        $output     = $this->option('output')    ?? base_path('larchi-class.puml');
         $withVendor = (bool) $this->option('with-vendor');
 
         $this->info("🔍 Analyzing namespace: <comment>{$namespace}</comment>");
@@ -33,14 +33,15 @@ class LarchiClassCommand extends Command
 
         $this->info("Found <comment>" . count($classes) . "</comment> class(es). Generating diagram...");
 
-        $classData = [];
+        $appClasses = [];
         foreach ($classes as $fqcn) {
             $this->line("  → <comment>{$fqcn}</comment>");
-            // Pass withVendor=false to analyze; force eloquentMode=false
-            $classData[] = $analyzer->analyzeAsPlainClass($fqcn, $withVendor);
+            $appClasses[] = $analyzer->analyze($fqcn, $withVendor, isEloquentModel: false);
         }
 
-        $puml = $generator->generate($classData, $withVendor, keepRelationMethods: false);
+        $vendorClasses = $withVendor ? $analyzer->buildVendorStubs($appClasses) : [];
+
+        $puml = $generator->generate($appClasses, $vendorClasses);
         file_put_contents($output, $puml);
 
         $this->newLine();

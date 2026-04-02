@@ -25,7 +25,7 @@ class RelationshipExtractor
     /**
      * Maps Eloquent relation return-type short names → canonical kind label.
      */
-    private const RETURN_TYPE_MAP = [
+    protected const RETURN_TYPE_MAP = [
         // hasOne / hasMany
         'HasOne'           => 'hasOne',
         'HasMany'          => 'hasMany',
@@ -46,7 +46,7 @@ class RelationshipExtractor
     /**
      * Maps $this->xxx() call names → canonical kind label (body-scan fallback).
      */
-    private const BODY_CALL_MAP = [
+    protected const BODY_CALL_MAP = [
         'hasOne'         => 'hasOne',
         'hasMany'        => 'hasMany',
         'belongsTo'      => 'belongsTo',
@@ -96,7 +96,7 @@ class RelationshipExtractor
     // Strategy 1 - return type hint
     // -----------------------------------------------------------------------
 
-    private function detectByReturnType(ReflectionMethod $method, ReflectionClass $classRef): ?array
+    protected function detectByReturnType(ReflectionMethod $method, ReflectionClass $classRef): ?array
     {
         $returnType = $method->getReturnType();
         if ($returnType === null) {
@@ -153,7 +153,7 @@ class RelationshipExtractor
     // Strategy 2 - method body scan
     // -----------------------------------------------------------------------
 
-    private function detectByBodyScan(ReflectionMethod $method, ReflectionClass $classRef): ?array
+    protected function detectByBodyScan(ReflectionMethod $method, ReflectionClass $classRef): ?array
     {
         $body = $this->readMethodBody($method);
         if ($body === null) {
@@ -199,7 +199,7 @@ class RelationshipExtractor
     // Related-model extraction from method body
     // -----------------------------------------------------------------------
 
-    private function extractRelatedFromBody(ReflectionMethod $method, ReflectionClass $classRef): ?array
+    protected function extractRelatedFromBody(ReflectionMethod $method, ReflectionClass $classRef): ?array
     {
         $body = $this->readMethodBody($method);
         if ($body === null) {
@@ -237,7 +237,7 @@ class RelationshipExtractor
      * Read the source of a method body (between the first { and matching }).
      * Returns null if the file is not readable or the method is native.
      */
-    private function readMethodBody(ReflectionMethod $method): ?string
+    protected function readMethodBody(ReflectionMethod $method): ?string
     {
         $file = $method->getFileName();
         if ($file === false || ! is_readable($file)) {
@@ -264,7 +264,7 @@ class RelationshipExtractor
      *   1. The namespace of the declaring class
      *   2. The use statements in the source file
      */
-    private function resolveClass(string $shortName, ReflectionClass $classRef): ?string
+    protected function resolveClass(string $shortName, ReflectionClass $classRef): ?string
     {
         // Try same namespace first (most common for models)
         $candidate = $classRef->getNamespaceName() . '\\' . $shortName;
@@ -303,7 +303,7 @@ class RelationshipExtractor
         return null;
     }
 
-    private function shortName(string $fqcn): string
+    protected function shortName(string $fqcn): string
     {
         $parts = explode('\\', $fqcn);
         return end($parts);

@@ -9,25 +9,19 @@ use Quatrebarbes\Larchiclass\Generators\PlantUmlGenerator;
 class LarchiModelCommand extends Command
 {
     protected $signature = 'larchi:model
-                            {--namespace= : Namespace to analyze (default: App\\Models)}
-                            {--output=    : Output file path (default: larchi-model.puml)}
-                            {--with-vendor           : Expand vendor classes in structural relations}
-                            {--keep-relation-methods : Keep relation methods in class blocks (in addition to relation lines)}';
+                            {--namespace=  : Namespace to analyze (default: App\\Models)}
+                            {--output=     : Output file path (default: larchi-model.puml)}
+                            {--with-vendor : Expand vendor classes in structural relations}';
 
     protected $description = 'Analyze Eloquent models and generate a PlantUML class diagram (with fillable properties and relationships)';
 
     public function handle(ClassAnalyzer $analyzer, PlantUmlGenerator $generator): int
     {
-        $namespace           = $this->option('namespace') ?? 'App\\Models';
-        $output              = $this->option('output')    ?? base_path('larchi-model.puml');
-        $withVendor          = (bool) $this->option('with-vendor');
-        $keepRelationMethods = (bool) $this->option('keep-relation-methods');
+        $namespace  = $this->option('namespace') ?? 'App\\Models';
+        $output     = $this->option('output')    ?? base_path('larchi-model.puml');
+        $withVendor = (bool) $this->option('with-vendor');
 
         $this->info("🔍 Analyzing namespace: <comment>{$namespace}</comment>");
-
-        if ($keepRelationMethods) {
-            $this->line("  <comment>--keep-relation-methods</comment>: relation methods kept in class blocks.");
-        }
 
         $classes = $analyzer->discoverClasses($namespace);
 
@@ -39,13 +33,15 @@ class LarchiModelCommand extends Command
 
         $this->info("Found <comment>" . count($classes) . "</comment> class(es). Generating diagram...");
 
-        $classData = [];
+        $appClasses = [];
         foreach ($classes as $fqcn) {
             $this->line("  → <comment>{$fqcn}</comment>");
-            $classData[] = $analyzer->analyze($fqcn, $withVendor);
+            $appClasses[] = $analyzer->analyze($fqcn, $withVendor, isEloquentModel: true);
         }
 
-        $puml = $generator->generate($classData, $withVendor, $keepRelationMethods);
+        $vendorClasses = $withVendor ? $analyzer->buildVendorStubs($appClasses) : [];
+
+        $puml = $generator->generate($appClasses, $vendorClasses);
         file_put_contents($output, $puml);
 
         $this->newLine();

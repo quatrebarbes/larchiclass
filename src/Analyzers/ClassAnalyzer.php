@@ -12,8 +12,9 @@ use Symfony\Component\Finder\Finder;
 class ClassAnalyzer
 {
     public function __construct(
-        private readonly RelationshipExtractor $relationshipExtractor = new RelationshipExtractor()
+        protected readonly RelationshipExtractor $relationshipExtractor = new RelationshipExtractor()
     ) {}
+
     /**
      * Discover all FQCN in a given namespace by scanning Composer's classmap.
      */
@@ -41,27 +42,13 @@ class ClassAnalyzer
     /**
      * Analyze a single class via Reflection and return structured data.
      * Eloquent-specific logic (fillable, relations) is applied when the class
-     * is detected as an Eloquent model.
-     *
-     * @see analyzeAsPlainClass() for a version that always skips Eloquent logic.
+     * is said and detected as an Eloquent model.
      */
-    public function analyze(string $fqcn, bool $withVendor = false): array
-    {
-        $ref     = new ReflectionClass($fqcn);
-        $isModel = $this->isEloquentModel($ref);
-
-        return $this->buildClassData($ref, $fqcn, $withVendor, forceNonEloquent: ! $isModel);
-    }
-
-    /**
-     * Analyze a class using only standard PHP reflection, ignoring any Eloquent
-     * metadata (fillable, casts, relations). Use this for larchi:class.
-     */
-    public function analyzeAsPlainClass(string $fqcn, bool $withVendor = false): array
+    public function analyze(string $fqcn, bool $withVendor = false, bool $isEloquentModel = false): array
     {
         $ref = new ReflectionClass($fqcn);
 
-        return $this->buildClassData($ref, $fqcn, $withVendor, forceNonEloquent: true);
+        return $this->buildClassData($ref, $fqcn, $withVendor, $isEloquentModel);
     }
 
     // -----------------------------------------------------------------------
@@ -70,18 +57,14 @@ class ClassAnalyzer
 
     /**
      * Build the full class data array.
-     *
-     * @param  bool  $forceNonEloquent  When true, skip Eloquent-specific logic
-     *                                  (fillable, relations) even if the class
-     *                                  is a subclass of Model.
      */
-    private function buildClassData(ReflectionClass $ref, string $fqcn, bool $withVendor, bool $forceNonEloquent): array
+    protected function buildClassData(ReflectionClass $ref, string $fqcn, bool $withVendor, bool $isEloquentModel): array
     {
         $parentFqcn    = $ref->getParentClass() ? $ref->getParentClass()->getName() : null;
         $interfaceFqcn = array_values($ref->getInterfaceNames());
         $traitFqcn     = array_values($ref->getTraitNames());
 
-        $isModel         = ! $forceNonEloquent && $this->isEloquentModel($ref);
+        $isModel         = $isEloquentModel && $this->isEloquentModel($ref);
         $relations       = $isModel ? $this->relationshipExtractor->extract($fqcn) : [];
         $relationMethods = array_column($relations, 'method');
 
@@ -183,10 +166,10 @@ class ClassAnalyzer
     }
 
     // -----------------------------------------------------------------------
-    // Private helpers
+    // Protected helpers
     // -----------------------------------------------------------------------
 
-    private function makeStub(string $fqcn): array
+    protected function makeStub(string $fqcn): array
     {
         try {
             $ref         = new ReflectionClass($fqcn);
@@ -223,7 +206,7 @@ class ClassAnalyzer
         ];
     }
 
-    private function isEloquentModel(ReflectionClass $ref): bool
+    protected function isEloquentModel(ReflectionClass $ref): bool
     {
         return $ref->isSubclassOf('Illuminate\Database\Eloquent\Model');
     }
@@ -247,7 +230,7 @@ class ClassAnalyzer
      *   - $appends   → public  (virtual / accessor attributes)
      *   - $dates     → public
      */
-    private function extractEloquentProperties(ReflectionClass $ref): array
+    protected function extractEloquentProperties(ReflectionClass $ref): array
     {
         // Safe instantiation - no constructor, no DB calls
         try {
@@ -319,14 +302,14 @@ class ClassAnalyzer
      * Read a protected/private array property from a model instance (or its
      * default value) without triggering Eloquent boot logic.
      */
-    private function readArrayProp(ReflectionClass $ref, ?object $instance, string $propName): array
+    protected function readArrayProp(ReflectionClass $ref, ?object $instance, string $propName): array
     {
         // Walk up the class hierarchy to find where the property is declared
         $declaring = $ref;
         while ($declaring !== false) {
             if ($declaring->hasProperty($propName)) {
                 $prop = $declaring->getProperty($propName);
-                $prop->setAccessible(true);
+                $prop->setAccessible(true); // deprecated
 
                 $value = $instance !== null
                     ? $prop->getValue($instance)
@@ -344,7 +327,7 @@ class ClassAnalyzer
      * Normalize Eloquent cast types to more readable labels.
      * Handles class-based casts (e.g. AsCollection::class) by using the short name.
      */
-    private function normalizeCastType(string $cast): string
+    protected function normalizeCastType(string $cast): string
     {
         // Class-based cast (FQCN or short name with backslash)
         if (str_contains($cast, '\\')) {
@@ -356,13 +339,15 @@ class ClassAnalyzer
         return explode(':', $cast)[0];
     }
 
-    private function extractProperties(ReflectionClass $ref): array
+    protected function extractProperties(ReflectionClass $ref): array
     {
         $properties = [];
 
         foreach ($ref->getProperties() as $prop) {
-            // Only own properties, not inherited ones
-            if ($prop->getDeclaringClass()->getName() !== $ref->getName()) {
+            $declaringClass = $prop->getDeclaringClass();
+
+            // Skip properties inherited from a parent class or a trait
+            if ($ref->getName() != $declaringClass->getName() || $declaringClass->isTrait()) {
                 continue;
             }
 
@@ -377,12 +362,15 @@ class ClassAnalyzer
         return $properties;
     }
 
-    private function extractMethods(ReflectionClass $ref): array
+    protected function extractMethods(ReflectionClass $ref): array
     {
-        $methods = [];
+        $classFile = $ref->getFileName();
+        $methods   = [];
 
         foreach ($ref->getMethods() as $method) {
-            if ($method->getDeclaringClass()->getName() !== $ref->getName()) {
+            // If the declaring class differs from $ref's file, it is inherited from a
+            // parent or provided by a trait - skip it.
+            if ($method->getFileName() != $classFile) {
                 continue;
             }
 
@@ -405,21 +393,21 @@ class ClassAnalyzer
         return $methods;
     }
 
-    private function visibility(ReflectionProperty $prop): string
+    protected function visibility(ReflectionProperty $prop): string
     {
         if ($prop->isPublic()) return 'public';
         if ($prop->isProtected()) return 'protected';
         return 'private';
     }
 
-    private function methodVisibility(ReflectionMethod $method): string
+    protected function methodVisibility(ReflectionMethod $method): string
     {
         if ($method->isPublic()) return 'public';
         if ($method->isProtected()) return 'protected';
         return 'private';
     }
 
-    private function resolveType(mixed $type): ?string
+    protected function resolveType(mixed $type): ?string
     {
         if ($type === null) {
             return null;
@@ -440,7 +428,7 @@ class ClassAnalyzer
         return (string) $type;
     }
 
-    private function getComposerClassMap(): array
+    protected function getComposerClassMap(): array
     {
         $autoloadFile = base_path('vendor/composer/autoload_classmap.php');
         if (file_exists($autoloadFile)) {
@@ -449,7 +437,7 @@ class ClassAnalyzer
         return [];
     }
 
-    private function discoverByFilesystem(string $namespace): array
+    protected function discoverByFilesystem(string $namespace): array
     {
         $classes = [];
 
