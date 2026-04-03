@@ -3,73 +3,80 @@
 namespace Quatrebarbes\Larchiclass\Analyzers;
 
 use ReflectionClass;
+use ReflectionIntersectionType;
 use ReflectionMethod;
-use ReflectionProperty;
 use ReflectionNamedType;
+use ReflectionProperty;
 use ReflectionUnionType;
-use Symfony\Component\Finder\Finder;
 
 class ClassAnalyzer
 {
-    public function __construct(
-        protected readonly RelationshipExtractor $relationshipExtractor = new RelationshipExtractor()
-    ) {}
-
     /**
      * Discover all FQCNs in a given namespace by scanning Composer's classmap,
      * with a filesystem fallback (PSR-4 convention).
      */
-    public function discoverClasses(string $namespace): array
+    public function listClasses(string $namespace, bool $withVendors, bool $isEloquent): array
     {
         $namespace = rtrim($namespace, '\\');
+        $namespace = str_replace('\\', '\\\\', $namespace);
 
-        $classes = array_filter(
-            array_keys($this->getComposerClassMap()),
-            fn (string $fqcn) => str_starts_with($fqcn, $namespace . '\\') || $fqcn === $namespace
-        );
+        $classes = array_keys($this->getComposerClassMap());
+        $classes = array_filter($classes, fn (string $fqcn) => preg_match('/^' . $namespace . '(\\\\|$)/', $fqcn));
+        if (! $withVendors) {
+            $classes = array_filter($classes, fn (string $fqcn) => ! $this->isVendorClass($fqcn));
+        }
+        if ($isEloquent) {
+            $classes = array_filter($classes, function (string $fqcn) {
+                $ref = new ReflectionClass($fqcn);
+                return $ref->isSubclassOf('Illuminate\Database\Eloquent\Model');
+            });
+        }
 
-        return array_values($classes);
+        return $classes;
     }
 
     /**
-     * Analyze a single class via Reflection and return structured data.
+     * Build detailed entries for targeted classes
      */
-    public function analyze(string $fqcn, bool $withVendor = false, bool $isEloquentModel = false): array
+    public function readTargetedClasses(string $fqcn, bool $isEloquentModel = false): array
     {
-        return $this->buildClassData(new ReflectionClass($fqcn), $fqcn, $withVendor, $isEloquentModel);
-    }
+        $ref = new ReflectionClass($fqcn);
 
-    // -------------------------------------------------------------------------
-    // Core data builder
-    // -------------------------------------------------------------------------
-
-    protected function buildClassData(ReflectionClass $ref, string $fqcn, bool $withVendor, bool $isEloquentModel): array
-    {
         $parentFqcn = $ref->getParentClass() ? $ref->getParentClass()->getName() : null;
+        $interfaces = array_values($ref->getInterfaceNames());
+        $traits     = array_values($ref->getTraitNames());
 
-        $isModel   = $isEloquentModel && $this->isEloquentModel($ref);
-        $relations = $isModel ? $this->relationshipExtractor->extract($fqcn) : [];
+        $structuralFqcns = array_filter(array_merge(
+            $parentFqcn ? [$parentFqcn] : [],
+            $interfaces,
+            $traits,
+        ));
+
+        $relations = [];
+        if ($isEloquentModel) {
+            $relationshipExtractor = new RelationshipExtractor();
+            $relations = $relationshipExtractor->extract($fqcn);
+        }
 
         return [
-            'fqcn'            => $fqcn,
-            'name'            => $ref->getShortName(),
-            'namespace'       => $ref->getNamespaceName(),
-            'isAbstract'      => $ref->isAbstract() && ! $ref->isInterface(),
-            'isInterface'     => $ref->isInterface(),
-            'isTrait'         => $ref->isTrait(),
-            'isEnum'          => $ref->isEnum(),
-            'isEloquent'      => $isModel,
-            'isVendor'        => false,
-            'parent'          => $parentFqcn,
-            'parentIsVendor'  => $parentFqcn !== null && $this->isVendorClass($parentFqcn),
-            'interfaces'      => array_values($ref->getInterfaceNames()),
-            'traits'          => array_values($ref->getTraitNames()),
-            'withVendor'      => $withVendor,
-            'relations'       => $relations,
-            'properties'      => $isModel
+            'fqcn'         => $fqcn,
+            'name'         => $ref->getShortName(),
+            'namespace'    => $ref->getNamespaceName(),
+            'isAbstract'   => $ref->isAbstract() && ! $ref->isInterface(),
+            'isInterface'  => $ref->isInterface(),
+            'isTrait'      => $ref->isTrait(),
+            'isEnum'       => $ref->isEnum(),
+            'isEloquent'   => $isEloquentModel,
+            'isVendor'     => false,
+            'parent'       => $parentFqcn,
+            'interfaces'   => $interfaces,
+            'traits'       => $traits,
+            'relations'    => $relations,
+            'dependencies' => $this->extractDependencies($ref, $structuralFqcns),
+            'properties'   => $isEloquentModel
                 ? $this->extractEloquentProperties($ref)
                 : $this->extractProperties($ref),
-            'methods'         => array_filter(
+            'methods'      => array_filter(
                 $this->extractMethods($ref),
                 fn($method) => !in_array($method['name'], array_column($relations, 'method'))
             ),
@@ -77,19 +84,22 @@ class ClassAnalyzer
     }
 
     /**
-     * Build stub entries for vendor classes referenced as parents / interfaces / traits.
+     * Build stub entries for related classes referenced as parents / interfaces / traits.
      */
-    public function buildVendorStubs(array $classDataList): array
+    public function readRelatedClasses(array $classDataList, bool $withVendors): array
     {
         $knownFqcn = array_column($classDataList, 'fqcn');
         $stubs     = [];
         $seen      = [];
 
         foreach ($classDataList as $class) {
+
+            // Merge all king of related classes
             $refs = array_filter(array_merge(
                 $class['parent'] ? [$class['parent']] : [],
                 $class['interfaces'],
                 $class['traits'],
+                $class['dependencies'],
             ));
 
             foreach ($refs as $fqcn) {
@@ -97,21 +107,9 @@ class ClassAnalyzer
                     continue;
                 }
 
-                if (! $this->isVendorClass($fqcn)) {
-                    continue;
-                }
-
                 $seen[$fqcn] = true;
 
-                if ($class['withVendor']) {
-                    try {
-                        $analyzed             = $this->analyze($fqcn, true);
-                        $analyzed['isVendor'] = true;
-                        $stubs[]              = $analyzed;
-                    } catch (\Throwable) {
-                        $stubs[] = $this->makeStub($fqcn);
-                    }
-                } else {
+                if (! $this->isVendorClass($fqcn) || $withVendors) {
                     $stubs[] = $this->makeStub($fqcn);
                 }
             }
@@ -133,7 +131,11 @@ class ClassAnalyzer
         }
 
         try {
-            $file = (new ReflectionClass($fqcn))->getFileName();
+            $ref = new ReflectionClass($fqcn);
+            if ($ref->isInternal()) {
+                return true; // hide internal classes, like vendors
+            }
+            $file = $ref->getFileName();
             return $file !== false && str_contains(str_replace('\\', '/', $file), '/vendor/');
         } catch (\Throwable) {
             return false;
@@ -158,29 +160,94 @@ class ClassAnalyzer
         $parts = explode('\\', $fqcn);
 
         return [
-            'fqcn'            => $fqcn,
-            'name'            => end($parts),
-            'namespace'       => implode('\\', array_slice($parts, 0, -1)),
-            'isAbstract'      => $isAbstract,
-            'isInterface'     => $isInterface,
-            'isTrait'         => $isTrait,
-            'isEnum'          => false,
-            'isVendor'        => true,
-            'isStub'          => true,
-            'parent'          => null,
-            'parentIsVendor'  => false,
-            'interfaces'      => [],
-            'traits'          => [],
-            'withVendor'      => false,
-            'relations'       => [],
-            'properties'      => [],
-            'methods'         => [],
+            'fqcn'         => $fqcn,
+            'name'         => end($parts),
+            'namespace'    => implode('\\', array_slice($parts, 0, -1)),
+            'isAbstract'   => $isAbstract,
+            'isInterface'  => $isInterface,
+            'isTrait'      => $isTrait,
+            'isEnum'       => false,
+            'isEloquent'   => false,
+            'isVendor'     => $this->isVendorClass($fqcn),
+            'isStub'       => true,
+            'parent'       => null,
+            'interfaces'   => [],
+            'traits'       => [],
+            'relations'    => [],
+            'dependencies' => [],
+            'properties'   => [],
+            'methods'      => [],
         ];
     }
 
-    protected function isEloquentModel(ReflectionClass $ref): bool
+    /**
+     * Collect dependency FQCNs via Reflection by inspecting all type hints declared
+     * in the class's own properties, method parameters, and method return types.
+     *
+     * FQCNs already represented as parent, interface, or trait are excluded,
+     * as are built-in types (int, string, bool, …) and the class itself.
+     *
+     * @param  string[]  $excludedFqcns  FQCNs already modelled as structural relations
+     * @return string[]
+     */
+    protected function extractDependencies(ReflectionClass $ref, array $excludedFqcns): array
     {
-        return $ref->isSubclassOf('Illuminate\Database\Eloquent\Model');
+        $classFile = $ref->getFileName();
+        $excluded  = array_merge($excludedFqcns, [$ref->getName()]);
+        $collected = [];
+
+        // Properties declared in this class
+        foreach ($ref->getProperties() as $prop) {
+            if ($prop->getDeclaringClass()->getName() !== $ref->getName()) {
+                continue;
+            }
+            $this->collectFromType($prop->getType(), $excluded, $collected);
+        }
+
+        // Methods declared in this class
+        foreach ($ref->getMethods() as $method) {
+            if ($method->getFileName() !== $classFile) {
+                continue;
+            }
+            $this->collectFromType($method->getReturnType(), $excluded, $collected);
+        }
+
+        return array_values(array_unique($collected));
+    }
+
+    /**
+     * Extract class/interface FQCNs from a ReflectionType (named, union, or intersection)
+     * and append non-built-in, non-excluded ones to $collected.
+     *
+     * @param  string[]  $excluded
+     * @param  string[]  &$collected
+     */
+    protected function collectFromType(mixed $type, array $excluded, array &$collected): void
+    {
+        if ($type === null) {
+            return;
+        }
+
+        $named = match (true) {
+            $type instanceof ReflectionNamedType        => [$type],
+            $type instanceof ReflectionUnionType        => $type->getTypes(),
+            $type instanceof ReflectionIntersectionType => $type->getTypes(),
+            default                                     => [],
+        };
+
+        foreach ($named as $t) {
+            if (! ($t instanceof ReflectionNamedType) || $t->isBuiltin()) {
+                continue;
+            }
+
+            $fqcn = $t->getName();
+
+            if (in_array($fqcn, $excluded, true)) {
+                continue;
+            }
+
+            $collected[] = $fqcn;
+        }
     }
 
     /**
@@ -330,7 +397,7 @@ class ClassAnalyzer
 
             $methods[] = [
                 'name'       => $method->getName(),
-                'visibility' => $this->methodVisibility($method),
+                'visibility' => $this->visibility($method),
                 'static'     => $method->isStatic(),
                 'abstract'   => $method->isAbstract(),
                 'return'     => $this->resolveType($method->getReturnType()),
@@ -341,21 +408,12 @@ class ClassAnalyzer
         return $methods;
     }
 
-    protected function visibility(ReflectionProperty $prop): string
+    protected function visibility(ReflectionProperty|ReflectionMethod $item): string
     {
         return match (true) {
-            $prop->isPublic()    => 'public',
-            $prop->isProtected() => 'protected',
+            $item->isPublic()    => 'public',
+            $item->isProtected() => 'protected',
             default              => 'private',
-        };
-    }
-
-    protected function methodVisibility(ReflectionMethod $method): string
-    {
-        return match (true) {
-            $method->isPublic()    => 'public',
-            $method->isProtected() => 'protected',
-            default                => 'private',
         };
     }
 

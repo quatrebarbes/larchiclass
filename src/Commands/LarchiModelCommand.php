@@ -5,9 +5,10 @@ namespace Quatrebarbes\Larchiclass\Commands;
 class LarchiModelCommand extends BaseLarchiCommand
 {
     protected $signature = 'larchi:model
-                            {--namespace=  : Namespace to analyze (default: App\Models)}
-                            {--output=     : Output file path (default: larchi-model.puml)}
-                            {--with-vendor : Expand vendor classes in structural relations}';
+                            {--namespace=   : Namespace to analyze (default: App\Models)}
+                            {--output=      : Output file path (default: larchi-model.puml)}
+                            {--with-related : Display related classes}
+                            {--with-vendors : Display vendor classes}';
 
     protected $description = 'Analyze Eloquent models and generate a PlantUML class diagram (with fillable properties and relationships)';
 

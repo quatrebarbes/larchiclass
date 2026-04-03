@@ -6,14 +6,9 @@ class PlantUmlGenerator
 {
     /**
      * Generate a PlantUML diagram string from analyzed class data.
-     *
-     * @param  array[]  $appClasses     Output of ClassAnalyzer::analyze()
-     * @param  array[]  $vendorClasses  Output of ClassAnalyzer::buildVendorStubs()
      */
-    public function generate(array $appClasses, array $vendorClasses = []): string
+    public function generate(array $classes): string
     {
-        $allClasses = array_merge($appClasses, $vendorClasses);
-
         $lines = [
             '@startuml',
             '',
@@ -36,41 +31,28 @@ class PlantUmlGenerator
             'skinparam class {',
             '    BackgroundColor<<model>> #D8F3DC',
             '    BorderColor<<model>> #52B788',
+            '    BackgroundColor<<vendor>> #E9ECEF',
+            '    BorderColor<<vendor>> #ADB5BD',
+            '    FontColor<<vendor>> #6C757D',
+            '}',
+            '',
+            'hide empty members',
+            '',
         ];
 
-        if (! empty($vendorClasses)) {
-            $lines[] = '    BackgroundColor<<vendor>> #E9ECEF';
-            $lines[] = '    BorderColor<<vendor>> #ADB5BD';
-            $lines[] = '    FontColor<<vendor>> #6C757D';
+        $lines[] = "' -- Application classes -----------------------------";
+        foreach ($classes as $class) {
+            $lines[] = $this->renderClassBlock($class);
         }
 
-        $lines[] = '}';
-        $lines[] = '';
-        $lines[] = 'hide empty members';
-        $lines[] = '';
-
-        if (! empty($appClasses)) {
-            $lines[] = "' -- Application classes -----------------------------";
-            foreach ($appClasses as $class) {
-                $lines[] = $this->renderClassBlock($class);
-            }
-        }
-
-        if (! empty($vendorClasses)) {
-            $lines[] = "' -- Vendor classes (stubs) --------------------------";
-            foreach ($vendorClasses as $class) {
-                $lines[] = $this->renderClassBlock($class);
-            }
-        }
-
-        $structuralRelations = $this->renderStructuralRelations($allClasses);
+        $structuralRelations = $this->renderStructuralRelations($classes);
         if (! empty($structuralRelations)) {
             $lines[] = '';
             $lines[] = "' -- Structural relations (extends / implements / uses) --";
             array_push($lines, ...$structuralRelations);
         }
 
-        $eloquentRelations = $this->renderEloquentRelations($allClasses);
+        $eloquentRelations = $this->renderEloquentRelations($classes);
         if (! empty($eloquentRelations)) {
             $lines[] = '';
             $lines[] = "' -- Eloquent relationships --------------------------";
@@ -89,8 +71,6 @@ class PlantUmlGenerator
 
     protected function renderClassBlock(array $class): string
     {
-        $isVendor = $class['isVendor'] ?? false;
-
         $keyword = match (true) {
             $class['isInterface'] => 'interface',
             $class['isAbstract']  => 'abstract class',
@@ -99,33 +79,27 @@ class PlantUmlGenerator
         };
 
         $stereotypes = array_filter([
-            $class['isTrait']              ? '<<trait>>'  : null,
-            ($class['isEloquent'] ?? false) ? '<<model>>'  : null,
-            $isVendor                       ? '<<vendor>>' : null,
+            $class['isTrait']    ? '<<trait>>'  : null,
+            $class['isEloquent'] ? '<<model>>'  : null,
+            $class['isVendor']   ? '<<vendor>>' : null,
         ]);
         $stereotype = $stereotypes ? ' ' . implode(' ', $stereotypes) : '';
 
-        $lines   = ["{$keyword} {$class['fqcn']}{$stereotype} {"];
+        $lines = ["{$keyword} {$class['fqcn']}{$stereotype} {"];
 
-        if (! $isVendor) {
-            foreach ($class['properties'] as $prop) {
-                $visibility = $this->visibilitySymbol($prop['visibility']);
-                $static     = $prop['static'] ? '{static} ' : '';
-                $type       = $prop['type'] ? ' : ' . $this->escapeType($prop['type']) : '';
-                $lines[]    = "    {$visibility}{$static}{$prop['name']}{$type}";
-            }
+        foreach ($class['properties'] as $prop) {
+            $visibility = $this->visibilitySymbol($prop['visibility']);
+            $static     = $prop['static'] ? '{static} ' : '';
+            $type       = $prop['type'] ? ' : ' . $this->escapeType($prop['type']) : '';
+            $lines[]    = "    {field}{$visibility}{$static}{$prop['name']}{$type}";
+        }
 
-            if (! empty($class['properties']) && ! empty($class['methods'])) {
-                $lines[] = '    --';
-            }
-
-            $methods = $class['methods'] ?? [];
-            foreach ($methods as $method) {
-                $visibility = $this->visibilitySymbol($method['visibility']);
-                $static     = $method['static']   ? '{static} '   : '';
-                $abstract   = $method['abstract'] ? '{abstract} ' : '';
-                $lines[]    = "    {$visibility}{$abstract}{$static}{$method['name']}";
-            }
+        $methods = $class['methods'] ?? [];
+        foreach ($methods as $method) {
+            $visibility = $this->visibilitySymbol($method['visibility']);
+            $static     = $method['static']   ? '{static} '   : '';
+            $abstract   = $method['abstract'] ? '{abstract} ' : '';
+            $lines[]    = "    {method}{$visibility}{$abstract}{$static}{$method['name']}";
         }
 
         $lines[] = '}';
@@ -136,24 +110,32 @@ class PlantUmlGenerator
 
     protected function renderStructuralRelations(array $classes): array
     {
-        $lines      = [];
+        $lines = [];
+
+        $whiteListedFqcn = array_column($classes, 'fqcn');
 
         foreach ($classes as $class) {
             $fqcn = $class['fqcn'];
 
-            if ($class['parent'] && isset($class['parent'])) {
+            if ($class['parent'] && in_array($class['parent'], $whiteListedFqcn)) {
                 $lines[] = "{$class['parent']} <|-- {$fqcn}";
             }
 
             foreach ($class['interfaces'] as $iface) {
-                if (isset($iface)) {
+                if (in_array($iface, $whiteListedFqcn)) {
                     $lines[] = "{$iface} <|.. {$fqcn}";
                 }
             }
 
             foreach ($class['traits'] as $trait) {
-                if (isset($trait)) {
+                if (in_array($trait, $whiteListedFqcn)) {
                     $lines[] = "{$trait} <.. {$fqcn} : <<uses>>";
+                }
+            }
+
+            foreach ($class['dependencies'] ?? [] as $dep) {
+                if (in_array($dep, $whiteListedFqcn)) {
+                    $lines[] = "{$fqcn} ..> {$dep} : <<uses>>";
                 }
             }
         }
@@ -185,6 +167,8 @@ class PlantUmlGenerator
         $edges      = [];
         $morphEdges = [];
 
+        $whiteListedFqcn = array_column($classes, 'fqcn');
+
         foreach ($classes as $class) {
             foreach ($class['relations'] ?? [] as $rel) {
                 if ($rel['kind'] === 'morphTo' || $rel['related'] === '*') {
@@ -192,7 +176,7 @@ class PlantUmlGenerator
                     continue;
                 }
 
-                $targetName = ($rel['relatedFqcn'] && isset($rel['relatedFqcn']))
+                $targetName = ($rel['relatedFqcn'] && in_array($rel['relatedFqcn'], $whiteListedFqcn))
                     ? $rel['relatedFqcn']
                     : $rel['related'];
 
