@@ -5,6 +5,7 @@ namespace Quatrebarbes\Larchiclass;
 use Illuminate\Support\ServiceProvider;
 use Quatrebarbes\Larchiclass\Analyzers\ClassAnalyzer;
 use Quatrebarbes\Larchiclass\Analyzers\EloquentRelationshipExtractor;
+use Quatrebarbes\Larchiclass\Commands\LarchiCallerCommand;
 use Quatrebarbes\Larchiclass\Commands\LarchiClassCommand;
 use Quatrebarbes\Larchiclass\Commands\LarchiModelCommand;
 use Quatrebarbes\Larchiclass\Generators\ClassUmlGenerator;
@@ -26,8 +27,9 @@ class LarchiServiceProvider extends ServiceProvider
     {
         if ($this->app->runningInConsole()) {
             $this->commands([
-                LarchiModelCommand::class,
+                LarchiCallerCommand::class,
                 LarchiClassCommand::class,
+                LarchiModelCommand::class,
             ]);
         }
     }

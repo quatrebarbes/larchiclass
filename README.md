@@ -16,22 +16,24 @@ composer require quatrebarbes/larchiclass --dev
 
 ## Commands
 
-| Command        | Description                                                                                                            |
-|----------------|------------------------------------------------------------------------------------------------------------------------|
-| `larchi:class` | General-purpose diagram — classes, interfaces, traits, enums. Dependencies resolved from type hints.                   |
-| `larchi:model` | Eloquent diagram — `$fillable`, `$casts`, `$hidden` properties and relationships (`hasMany`, `belongsTo`, `morphTo`…). |
-
-### Available options
-
-| Option           | Description                                                                     | Default                                   |
-|------------------|---------------------------------------------------------------------------------|-------------------------------------------|
-| `--namespace`    | Namespace to analyze (basic string ou regex)                                    | `App` / `App\Models`                      |
-| `--output`       | Output file path                                                                | `larchi-class.puml` / `larchi-model.puml` |
-| `--with-related` | Include referenced classes (parents, interfaces, traits, dependencies) as stubs | disabled                                  |
-| `--with-vendors` | Include classes from `/vendor/`                                                 | disabled                                  |
+| Command         | Description                                                                                                            |
+|-----------------|------------------------------------------------------------------------------------------------------------------------|
+| `larchi:caller` | Analyze all the function callers leading to a method & shdescribe the flow into a diagram.                             |
+| `larchi:class`  | General-purpose diagram — classes, interfaces, traits, enums. Dependencies resolved from type hints.                   |
+| `larchi:model`  | Eloquent diagram — `$fillable`, `$casts`, `$hidden` properties and relationships (`hasMany`, `belongsTo`, `morphTo`…). |
 
 
-### Examples of using a general class diagram
+### Examples of using `larchi:caller`
+
+```bash
+# Default output: larchi-caller.puml
+php artisan larchi:class "App\Domain\Billing::readInvoice"
+
+# Custom output file
+php artisan larchi:class "App\Domain\Billing::readInvoice" --output="docs/billing-read-invoice.puml"
+```
+
+### Examples of using `larchi:class`
 
 ```bash
 # Default namespace (App), output: larchi-class.puml
@@ -50,7 +52,7 @@ php artisan larchi:class --namespace="App\Http\Controllers" --with-related
 php artisan larchi:class --with-related --with-vendors
 ```
 
-### Example of using an Eloquent model diagram
+### Example of using `larchi:model`
 
 ```bash
 # Default namespace (App\Models), output: larchi-model.puml
@@ -67,7 +69,12 @@ php artisan larchi:model --with-related --with-vendors
 
 ## What the diagram includes
 
-### larchi:class
+### `larchi:caller`
+
+- All functions/methods that call the target method directly or not
+- The complete chain of callers up to http routes & artisan commands
+
+### `larchi:class`
 
 - All classes, interfaces, traits, and enums in the target namespace
 - Properties with type, visibility (`+` `#` `-`), and `{static}` modifier
@@ -75,7 +82,7 @@ php artisan larchi:model --with-related --with-vendors
 - Inheritance arrows (`<|--`), implementation arrows (`<|..`), trait usage (`<..`), and dependency arrows (`..>`)
 - Stubs for classes referenced outside the scope (with `--with-related`)
 
-### larchi:model (everything above, plus…)
+### `larchi:model` (everything from `larchi:class`, plus…)
 
 - Properties sourced from `$fillable`, `$hidden`, `$casts`, `$dates`, and `$appends`
 - Computed visibility: a field present in both `$fillable` and `$hidden` is rendered as `private`

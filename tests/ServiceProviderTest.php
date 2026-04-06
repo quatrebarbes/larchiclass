@@ -40,6 +40,11 @@ class ServiceProviderTest extends TestCase
         $this->assertSame($a, $b);
     }
 
+    public function test_larchi_caller_command_registered(): void
+    {
+        $this->assertArrayHasKey('larchi:caller', Artisan::all());
+    }
+
     public function test_larchi_class_command_registered(): void
     {
         $this->assertArrayHasKey('larchi:class', Artisan::all());
