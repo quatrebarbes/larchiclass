@@ -20,7 +20,7 @@ use ReflectionMethod;
  *   - related     : short class name of the related model (e.g. "Post")
  *   - relatedFqcn : fully qualified class name when resolvable, otherwise null
  */
-class RelationshipExtractor
+class EloquentRelationshipExtractor
 {
     /**
      * Maps Eloquent relation return-type short names → canonical kind label.

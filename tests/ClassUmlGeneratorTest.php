@@ -3,19 +3,19 @@
 namespace Quatrebarbes\Larchiclass\Tests;
 
 use Orchestra\Testbench\TestCase;
-use Quatrebarbes\Larchiclass\Generators\PlantUmlGenerator;
+use Quatrebarbes\Larchiclass\Generators\ClassUmlGenerator;
 use Quatrebarbes\Larchiclass\LarchiServiceProvider;
 
-class PlantUmlGeneratorTest extends TestCase
+class ClassUmlGeneratorTest extends TestCase
 {
     protected function getPackageProviders($app): array
     {
         return [LarchiServiceProvider::class];
     }
 
-    private function generator(): PlantUmlGenerator
+    private function generator(): ClassUmlGenerator
     {
-        return new PlantUmlGenerator();
+        return new ClassUmlGenerator();
     }
 
     // -------------------------------------------------------------------------

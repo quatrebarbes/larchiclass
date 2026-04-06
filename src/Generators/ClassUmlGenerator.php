@@ -2,7 +2,7 @@
 
 namespace Quatrebarbes\Larchiclass\Generators;
 
-class PlantUmlGenerator
+class ClassUmlGenerator
 {
     /**
      * Generate a PlantUML diagram string from analyzed class data.

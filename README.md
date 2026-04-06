@@ -1,6 +1,12 @@
 # LarchiClass 😎
 
-A Laravel package that analyzes your PHP classes and generates a **PlantUML class diagram** (`.puml`).
+Some architecture-related commands for Laravel developers
+
+**PHP 8.1+** · **Laravel 10 / 11** · install as `--dev`
+
+Generate PlantUML class diagrams from your Laravel namespaces.
+
+LarchiClass inspects your PHP classes produces a `.puml` file ready to render with PlantUML. The `larchi:class` command covers all PHP types (classes, interfaces, traits, enums), while `larchi:model` enriches the diagram with Eloquent properties and model relationships.
 
 ## Installation
 
@@ -8,56 +14,73 @@ A Laravel package that analyzes your PHP classes and generates a **PlantUML clas
 composer require quatrebarbes/larchiclass --dev
 ```
 
-Laravel auto-discovers the service provider. No manual registration needed.
+## Commands
 
-## larchi:class
+| Command        | Description                                                                                                            |
+|----------------|------------------------------------------------------------------------------------------------------------------------|
+| `larchi:class` | General-purpose diagram — classes, interfaces, traits, enums. Dependencies resolved from type hints.                   |
+| `larchi:model` | Eloquent diagram — `$fillable`, `$casts`, `$hidden` properties and relationships (`hasMany`, `belongsTo`, `morphTo`…). |
+
+### Available options
+
+| Option           | Description                                                                     | Default                                   |
+|------------------|---------------------------------------------------------------------------------|-------------------------------------------|
+| `--namespace`    | Namespace to analyze (basic string ou regex)                                    | `App` / `App\Models`                      |
+| `--output`       | Output file path                                                                | `larchi-class.puml` / `larchi-model.puml` |
+| `--with-related` | Include referenced classes (parents, interfaces, traits, dependencies) as stubs | disabled                                  |
+| `--with-vendors` | Include classes from `/vendor/`                                                 | disabled                                  |
+
+
+### Examples of using a general class diagram
 
 ```bash
+# Default namespace (App), output: larchi-class.puml
 php artisan larchi:class
-```
 
-Generates `larchi-class.puml` at the root of your project.
-
-### Custom namespace
-
-```bash
+# Custom namespace
 php artisan larchi:class --namespace="App\Domain\Billing"
+
+# Custom output file
+php artisan larchi:class --output="docs/billing.puml"
+
+# Include parents and dependencies outside the namespace
+php artisan larchi:class --namespace="App\Http\Controllers" --with-related
+
+# Include everything, vendor classes included
+php artisan larchi:class --with-related --with-vendors
 ```
 
-### Custom output file
+### Example of using an Eloquent model diagram
 
 ```bash
-php artisan larchi:class --output="docs/diagram.puml"
-```
-
-### Both options combined
-
-```bash
-php artisan larchi:class --namespace="App\Domain\Marketing" --output="docs/marketing.puml"
-```
-
-## larchi:model
-
-```bash
+# Default namespace (App\Models), output: larchi-model.puml
 php artisan larchi:model
+
+# Specific subdomain
+php artisan larchi:model --namespace="App\Models\Billing" --output="docs/billing-models.puml"
+
+# Include Eloquent parent classes
+php artisan larchi:model --with-related --with-vendors
 ```
 
-Generates `larchi-model.puml` at the root of your project.
+> The `.puml` file can be rendered with [PlantUML](https://plantuml.com/), the VS Code PlantUML extension, or any compatible tool. The diagram is left-to-right by default.
 
-### Custom namespace
+## What the diagram includes
 
-```bash
-php artisan larchi:model --namespace="App\Models\SubDomain"
-```
+### larchi:class
 
-### Custom output file
+- All classes, interfaces, traits, and enums in the target namespace
+- Properties with type, visibility (`+` `#` `-`), and `{static}` modifier
+- Methods with visibility, `{abstract}`, and `{static}` modifiers
+- Inheritance arrows (`<|--`), implementation arrows (`<|..`), trait usage (`<..`), and dependency arrows (`..>`)
+- Stubs for classes referenced outside the scope (with `--with-related`)
 
-```bash
-php artisan larchi:model --output="docs/diagram.puml"
-```
+### larchi:model (everything above, plus…)
 
-### Both options combined
-
-```bash
-php artisan larchi:model --namespace="App\Models\SubDomain" --output="docs/sub-domain.puml"
-```
+- Properties sourced from `$fillable`, `$hidden`, `$casts`, `$dates`, and `$appends`
+- Computed visibility: a field present in both `$fillable` and `$hidden` is rendered as `private`
+- Types resolved from `$casts`: `decimal:2` → `decimal`, `AsCollection::class` → `AsCollection`
+- Eloquent relationships: `hasOne`, `hasMany`, `belongsTo`, `belongsToMany`, `hasManyThrough`, `hasOneThrough`, `morphOne`, `morphMany`, `morphTo`, `morphToMany`, `morphedByMany`
+- Automatic cardinality (`"1" -- "*"`, `"*" -- "*"`, etc.)
+- Reciprocal pairs merged into a single arrow annotated with both method names
+- Stereotypes `<<model>>`, `<<vendor>>`, `<<trait>>`

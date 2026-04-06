@@ -54,8 +54,8 @@ class ClassAnalyzer
 
         $relations = [];
         if ($isEloquentModel) {
-            $relationshipExtractor = new RelationshipExtractor();
-            $relations = $relationshipExtractor->extract($fqcn);
+            $EloquentRelationshipExtractor = new EloquentRelationshipExtractor();
+            $relations = $EloquentRelationshipExtractor->extract($fqcn);
         }
 
         return [

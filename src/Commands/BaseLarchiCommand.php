@@ -4,18 +4,16 @@ namespace Quatrebarbes\Larchiclass\Commands;
 
 use Illuminate\Console\Command;
 use Quatrebarbes\Larchiclass\Analyzers\ClassAnalyzer;
-use Quatrebarbes\Larchiclass\Generators\PlantUmlGenerator;
+use Quatrebarbes\Larchiclass\Generators\ClassUmlGenerator;
 
 abstract class BaseLarchiCommand extends Command
 {
-    abstract protected function defaultNamespace(): string;
-    abstract protected function defaultOutput(): string;
     abstract protected function isEloquentMode(): bool;
 
-    public function handle(ClassAnalyzer $analyzer, PlantUmlGenerator $generator): int
+    public function handle(ClassAnalyzer $analyzer, ClassUmlGenerator $generator): int
     {
-        $namespace   = $this->option('namespace') ?? $this->defaultNamespace();
-        $output      = $this->option('output')    ?? $this->defaultOutput();
+        $namespace   = $this->option('namespace');
+        $output      = $this->option('output');
         $withRelated = (bool) $this->option('with-related');
         $withVendors = (bool) $this->option('with-vendors');
         $isEloquent  = $this->isEloquentMode();
