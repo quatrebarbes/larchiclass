@@ -15,16 +15,14 @@ class ClassAnalyzer
      * Discover all FQCNs in a given namespace by scanning Composer's classmap,
      * with a filesystem fallback (PSR-4 convention).
      */
-    public function listClasses(string $namespace, bool $withVendors, bool $isEloquent): array
+    public function listClasses(string $namespace, bool $isEloquent): array
     {
         $namespace = rtrim($namespace, '\\');
         $namespace = str_replace('\\', '\\\\', $namespace);
 
         $classes = array_keys($this->getComposerClassMap());
         $classes = array_filter($classes, fn (string $fqcn) => preg_match('/^' . $namespace . '(\\\\|$)/', $fqcn));
-        if (! $withVendors) {
-            $classes = array_filter($classes, fn (string $fqcn) => ! $this->isVendorClass($fqcn));
-        }
+        $classes = array_filter($classes, fn (string $fqcn) => ! $this->isVendorClass($fqcn));
         if ($isEloquent) {
             $classes = array_filter($classes, function (string $fqcn) {
                 $ref = new ReflectionClass($fqcn);
@@ -54,8 +52,8 @@ class ClassAnalyzer
 
         $relations = [];
         if ($isEloquentModel) {
-            $EloquentRelationshipExtractor = new EloquentRelationshipExtractor();
-            $relations = $EloquentRelationshipExtractor->extract($fqcn);
+            $eloquentRelationshipExtractor = new EloquentRelationshipExtractor();
+            $relations = $eloquentRelationshipExtractor->extract($fqcn);
         }
 
         return [
@@ -99,6 +97,7 @@ class ClassAnalyzer
                 $class['parent'] ? [$class['parent']] : [],
                 $class['interfaces'],
                 $class['traits'],
+                array_column($class['relations'], 'relatedFqcn'),
                 $class['dependencies'],
             ));
 
@@ -153,8 +152,9 @@ class ClassAnalyzer
             $isInterface = $ref->isInterface();
             $isTrait     = $ref->isTrait();
             $isAbstract  = $ref->isAbstract() && ! $isInterface;
+            $isEloquent  = $ref->isSubclassOf('Illuminate\Database\Eloquent\Model');
         } catch (\Throwable) {
-            $isInterface = $isTrait = $isAbstract = false;
+            $isInterface = $isTrait = $isAbstract = $isEloquent = false;
         }
 
         $parts = explode('\\', $fqcn);
@@ -167,7 +167,7 @@ class ClassAnalyzer
             'isInterface'  => $isInterface,
             'isTrait'      => $isTrait,
             'isEnum'       => false,
-            'isEloquent'   => false,
+            'isEloquent'   => $isEloquent,
             'isVendor'     => $this->isVendorClass($fqcn),
             'isStub'       => true,
             'parent'       => null,

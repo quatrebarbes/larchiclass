@@ -175,12 +175,9 @@ class ClassUmlGenerator
                     $morphEdges[] = ['source' => $class['fqcn'], 'rel' => $rel];
                     continue;
                 }
-
-                $targetName = ($rel['relatedFqcn'] && in_array($rel['relatedFqcn'], $whiteListedFqcn))
-                    ? $rel['relatedFqcn']
-                    : $rel['related'];
-
-                $edges[] = ['source' => $class['fqcn'], 'target' => $targetName, 'rel' => $rel];
+                if ($rel['relatedFqcn'] && in_array($rel['relatedFqcn'], $whiteListedFqcn)) {
+                    $edges[] = ['source' => $class['fqcn'], 'target' => $rel['relatedFqcn'], 'rel' => $rel];
+                }
             }
         }
 

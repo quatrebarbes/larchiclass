@@ -20,7 +20,7 @@ abstract class BaseLarchiCommand extends Command
 
         $this->info("🔍 Analyzing namespace: <comment>{$namespace}</comment>");
 
-        $classes = $analyzer->listClasses($namespace, $withVendors, $isEloquent);
+        $classes = $analyzer->listClasses($namespace, $isEloquent);
         if (empty($classes)) {
             $this->warn("No classes found in namespace [{$namespace}].");
             $this->line('Make sure the namespace is loaded via Composer autoload.');

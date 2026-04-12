@@ -207,7 +207,7 @@ class EloquentRelationshipExtractor
         }
 
         // Pattern 1 - Foo::class
-        if (preg_match('/(\w+)::class/', $body, $m)) {
+        if (preg_match('/([A-Za-z0-9]+)::class/', $body, $m)) {
             $shortName = $m[1];
             return [
                 'short' => $shortName,
@@ -216,7 +216,7 @@ class EloquentRelationshipExtractor
         }
 
         // Pattern 2 - string literal 'App\Models\Foo' or "App\Models\Foo"
-        if (preg_match('/[\'"]([A-Za-z\\\\]+)[\'"]/', $body, $m)) {
+        if (preg_match('/[\'"]([A-Za-z0-9\\\\]+)[\'"]/', $body, $m)) {
             $raw   = $m[1];
             $short = $this->shortName($raw);
             $fqcn  = class_exists($raw) ? $raw : $this->resolveClass($short, $classRef);

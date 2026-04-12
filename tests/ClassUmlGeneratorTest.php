@@ -476,19 +476,6 @@ class ClassUmlGeneratorTest extends TestCase
         $this->assertStringContainsString('App\\Country "1" -- "*" App\\Post', $output);
     }
 
-    public function test_relation_out_of_scope_uses_short_name_as_target(): void
-    {
-        // relatedFqcn not in the class list — short name used instead
-        $user = $this->makeClass(['fqcn' => 'App\User', 'name' => 'User', 'relations' => [
-            ['kind' => 'hasMany', 'method' => 'posts', 'related' => 'Post', 'relatedFqcn' => null],
-        ]]);
-
-        $output = $this->generator()->generate([$user]);
-
-        // Arrow should use the short name 'Post' as target
-        $this->assertStringContainsString('"1" -- "*" Post', $output);
-    }
-
     // -------------------------------------------------------------------------
     // Reciprocal relation merging
     // -------------------------------------------------------------------------
